@@ -220,3 +220,13 @@ trait Visible {
 }
 
 const trait Foomp = Hash;
+
+pub(super) unsafe trait A: SomeLongNamedTraitThatAlmostReachesLengthLimitThisNameIsLong {
+    fn foo();
+}
+
+pub(super) unsafe trait A:
+    SomeLongNamedTraitThatExceedsTheLengthLimitTheNameDefinitelyTooLongToFitHere
+{
+    fn foo();
+}

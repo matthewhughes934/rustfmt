@@ -1176,8 +1176,13 @@ pub(crate) fn format_trait(
 
     let body_lo = context.snippet_provider.span_after(item.span, "{");
 
-    let shape = Shape::indented(offset, context.config).offset_left(result.len(), item.span)?;
-    let generics_str = rewrite_generics(context, rewrite_ident(context, ident), generics, shape)?;
+    let shape = Shape::indented(offset, context.config);
+    let generics_str = rewrite_generics(
+        context,
+        rewrite_ident(context, ident),
+        generics,
+        shape.offset_left(result.len(), item.span)?,
+    )?;
     result.push_str(&generics_str);
 
     // FIXME(#2055): rustfmt fails to format when there are comments between trait bounds.
