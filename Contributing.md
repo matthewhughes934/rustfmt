@@ -109,6 +109,30 @@ If you want to test modified `cargo-fmt`, or run `rustfmt` on the whole project 
 RUSTFMT="./target/debug/rustfmt" cargo run --bin cargo-fmt -- --manifest-path path/to/project/you/want2test/Cargo.toml
 ```
 
+#### Running a binary directly
+
+You may want to run one of the built binaries directly, for example to connect
+it to a debugger. Since `rustfmt` uses `rustc_driver` it needs to be linked
+against the version of that library for the current toolchain, without
+configuring anything you are likely to run into errors like:
+
+    $ ./target/debug/rustfmt
+    ./target/debug/rustfmt: error while loading shared libraries: librustc_driver-63b8deb6c23747dd.so: cannot open shared object file: No such file or directory
+
+This library will be in the sysroot of the current toolchain, so we can fix this
+by telling the linker to look there. For example on Linux with Bash:
+
+    LD_LIBRARY_PATH="$(rustc --print sysroot)/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" ./target/debug/rustfmt
+
+Equivalently, you could set the variable for the current environment:
+
+    $ export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    $ ./target/debug/rustfm
+
+Then, you can invoke a debugger like `rust-gdb`:
+
+    LD_LIBRARY_PATH="$(rustc --print sysroot)/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" rust-gdb --args ./target/debug/rustfmt --check some_file.rs
+
 ### Gate formatting changes
 
 A change that introduces a different code-formatting must be gated on the
