@@ -15,6 +15,7 @@ use std::str;
 
 use cargo_metadata::Edition;
 use clap::{CommandFactory, Parser};
+use itertools::Itertools;
 
 #[path = "test/mod.rs"]
 #[cfg(test)]
@@ -554,6 +555,52 @@ fn run_rustfmt(
         .filter_map(|s| if s.success() { None } else { s.code() })
         .next()
         .unwrap_or(SUCCESS))
+}
+
+fn chunk_args(
+    rustfmt_cmd: &mut Command,
+    edition: &Edition,
+    fmt_args: &[String],
+    files: Vec<&PathBuf>,
+) {
+    // note _bytes_. This is the _character_ limit for windows (see CreateProcessW) docs
+    // we make a _best effort_ to avoid this limit. Firstly, Windows takes arguments as UTF-16
+    // encoded string (i.e. 2-4 bytes per character). But, there's also extra escaping that is done
+    // when we span the process which can _add_ characters.
+    // Not addressed: what happens if the base args are greater than this limit, there's not really
+    // anything we can do in that case.
+    let cmd_arg_len_limit = 32_767;
+
+    let base_cmd = rustfmt_cmd
+        .args(["--edition", edition.as_str()])
+        .args(fmt_args);
+
+    fn os_str_arg_len(s: &std::ffi::OsStr) -> usize {
+        // length of arg + separating space
+        s.as_encoded_bytes().len() + 1
+    }
+
+    let base_args_len_bytes = base_cmd.get_program().as_encoded_bytes().len()
+        + base_cmd.get_args().map(os_str_arg_len).sum::<usize>();
+
+    fn new_rustfmt_comamnd(base_cmd: &Command) -> Command {
+        let mut cmd = Command::new(base_cmd.get_program());
+        cmd.args(base_cmd.get_args());
+        cmd
+    }
+    let mut current_command = new_rustfmt_comamnd(&base_cmd);
+
+    let mut arg_len_bytes = base_args_len_bytes;
+    for (_, chunk) in &files.iter().chunk_by(move |file| {
+        arg_len_bytes += os_str_arg_len(file.as_os_str());
+        arg_len_bytes >= cmd_arg_len_limit
+    }) {
+        let mut cmd = Command::new(base_cmd.get_program());
+        cmd.args(base_cmd.get_args());
+        cmd.args(chunk);
+        // TODO: exec the command
+        arg_len_bytes = base_args_len_bytes;
+    }
 }
 
 fn get_cargo_metadata(manifest_path: Option<&Path>) -> Result<cargo_metadata::Metadata, io::Error> {
