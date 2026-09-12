@@ -59,13 +59,12 @@ use std::borrow::Cow;
 use std::cmp::min;
 
 use rustc_ast::ast;
-use rustc_span::{BytePos, Span, symbol};
+use rustc_span::{Span, symbol};
 use tracing::debug;
 
 use crate::comment::{CharClasses, FullCodeCharKind, RichChar, rewrite_comment};
 use crate::config::{IndentStyle, StyleEdition};
 use crate::expr::rewrite_call;
-use crate::lists::extract_pre_comment;
 use crate::macros::convert_try_mac;
 use crate::rewrite::{
     ExceedsMaxWidthError, Rewrite, RewriteContext, RewriteError, RewriteErrorExt, RewriteResult,
@@ -404,42 +403,42 @@ impl Chain {
             s.chars().all(|c| c == '?')
         }
 
-        fn is_post_comment(s: &str) -> bool {
-            let comment_start_index = s.chars().position(|c| c == '/');
-            if comment_start_index.is_none() {
-                return false;
+        fn is_comment_on_same_line(snippet: &str) -> Option<bool> {
+            match (
+                snippet.chars().position(|c| c == '/'),
+                snippet.chars().position(|c| c == '\n'),
+            ) {
+                // no comment in snippet
+                (None, _) => None,
+                // no newline, comment is on the same line
+                (_, None) => Some(true),
+                (Some(comment_start_index), Some(newline_index)) => {
+                    Some(comment_start_index < newline_index)
+                }
             }
-
-            let newline_index = s.chars().position(|c| c == '\n');
-            if newline_index.is_none() {
-                return true;
-            }
-
-            comment_start_index.unwrap() < newline_index.unwrap()
         }
 
-        fn handle_post_comment(
+        fn handle_comment(
             post_comment_span: Span,
             post_comment_snippet: &str,
-            prev_span_end: &mut BytePos,
             children: &mut Vec<ChainItem>,
         ) {
             let white_spaces = &[' ', '\t'];
-            if post_comment_snippet
-                .trim_matches(white_spaces)
-                .starts_with('\n')
-            {
+            if post_comment_snippet.trim_matches(white_spaces).is_empty() {
                 // No post comment.
                 return;
             }
             let trimmed_snippet = trim_tries(post_comment_snippet);
-            if is_post_comment(&trimmed_snippet) {
+            if let Some(on_same_line) = is_comment_on_same_line(&trimmed_snippet) {
                 children.push(ChainItem::comment(
                     post_comment_span,
                     trimmed_snippet.trim().to_owned(),
-                    CommentPosition::SameLine,
+                    if on_same_line {
+                        CommentPosition::SameLine
+                    } else {
+                        CommentPosition::DifferentLine
+                    },
                 ));
-                *prev_span_end = post_comment_span.hi();
             }
         }
 
@@ -453,52 +452,27 @@ impl Chain {
             let comment_span = mk_sp(prev_span_end, first_chain_item.span.lo());
             let comment_snippet = context.snippet(comment_span);
             if !is_tries(comment_snippet.trim()) {
-                handle_post_comment(
-                    comment_span,
-                    comment_snippet,
-                    &mut prev_span_end,
-                    &mut children,
-                );
+                handle_comment(comment_span, comment_snippet, &mut children);
             }
         }
         while let Some(chain_item) = iter.next() {
             let comment_snippet = context.snippet(chain_item.span);
             // FIXME: Figure out the way to get a correct span when converting `try!` to `?`.
-            let handle_comment =
+            let should_handle_comment =
                 !(context.config.use_try_shorthand() || is_tries(comment_snippet.trim()));
-
-            // Pre-comment
-            if handle_comment {
-                let pre_comment_span = mk_sp(prev_span_end, chain_item.span.lo());
-                let pre_comment_snippet = trim_tries(context.snippet(pre_comment_span));
-                if let (Some(pre_comment), _) = extract_pre_comment(&pre_comment_snippet) {
-                    if !pre_comment.is_empty() {
-                        children.push(ChainItem::comment(
-                            pre_comment_span,
-                            pre_comment.to_owned(),
-                            CommentPosition::DifferentLine,
-                        ));
-                    }
-                }
-            }
 
             prev_span_end = chain_item.span.hi();
             children.push(chain_item);
 
             // Post-comment
-            if !handle_comment || iter.peek().is_none() {
+            if !should_handle_comment || iter.peek().is_none() {
                 continue;
             }
 
             let next_lo = iter.peek().unwrap().span.lo();
             let post_comment_span = mk_sp(prev_span_end, next_lo);
             let post_comment_snippet = context.snippet(post_comment_span);
-            handle_post_comment(
-                post_comment_span,
-                post_comment_snippet,
-                &mut prev_span_end,
-                &mut children,
-            );
+            handle_comment(post_comment_span, post_comment_snippet, &mut children);
         }
 
         Chain { parent, children }
