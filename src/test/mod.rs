@@ -983,6 +983,7 @@ impl Diff {
         }
         let mismatches = make_diff(expected, got, DIFF_CONTEXT_SIZE);
         if mismatches.is_empty() {
+            println!("got={:?}\nexpected={:?}\n", got, expected);
             Some(Self::LineEndings())
         } else {
             Some(Self::Mismatches(mismatches))
